@@ -63,14 +63,14 @@ def bisect(segments: np.ndarray, line: np.ndarray):
 
     if bisected_ahead.size != 0:
         if np.any(ahead_mask):
-            all_ahead = np.stack((segments[ahead_mask], bisected_ahead))
+            all_ahead = np.concatenate((segments[ahead_mask], bisected_ahead))
         else:
             all_ahead = bisected_ahead
     else:
         all_ahead = segments[ahead_mask]
     if bisected_behind.size != 0:
         if np.any(behind_mask):
-            all_behind = np.stack((segments[behind_mask], bisected_behind))
+            all_behind = np.concatenate((segments[behind_mask], bisected_behind))
         else: all_behind = bisected_behind
     else:
         all_behind = segments[behind_mask]
