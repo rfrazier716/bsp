@@ -35,17 +35,8 @@ def bisect(segments: np.ndarray, line: np.ndarray):
     # the intersection time is the point along the line segment where the line bisects it
     intersection = numerator / (denominator + parallel)
 
-    # segments are in front of the line if they are not parallel, and t<=0, or they are parallel, and numerator >0
-    ahead = np.logical_or(
-        np.logical_and(not_parallel, intersection <= 0),
-        np.logical_and(parallel, numerator > 0)
-    )
-
-    # segments are behind the line if !parallel and t>=0, of parallel, and the numerator is <0
-    behind = np.logical_or(
-        np.logical_and(not_parallel, intersection >= 1),
-        np.logical_and(parallel, numerator < 1)
-    )
+    ahead = numerator > 0
+    behind = numerator < 0
 
     # segments are colinear if they are parallel and the numerator is zero
     colinear = np.logical_and(parallel, np.isclose(numerator, 0))
@@ -67,8 +58,8 @@ def bisect(segments: np.ndarray, line: np.ndarray):
     bisected_behind = np.where(np.logical_not(mask), l_segments, r_segments)[bisected]
 
     # need to return 3 sets of segments, those in front, those colinear, and those behind
-    ahead_mask = np.logical_and(ahead, np.logical_not(colinear))
-    behind_mask = np.logical_and(behind, np.logical_not(colinear))
+    ahead_mask = np.logical_and(ahead, np.logical_not(bisected))
+    behind_mask = np.logical_and(behind, np.logical_not(bisected))
 
     if bisected_ahead.size != 0:
         if np.any(ahead_mask):
