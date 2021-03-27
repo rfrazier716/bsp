@@ -26,7 +26,7 @@ def bisect(segments: np.ndarray, line: np.ndarray):
     # need to solve for the intersection equation, first find the numerator and denominator
 
     numerator = np.cross((line[0] - segment_start), v1)
-    denominator = np.cross(v1, v1)
+    denominator = np.cross(v0, v1)
 
     # if the denominator is zero the lines are parallel
     parallel = np.isclose(denominator, 0)
@@ -64,18 +64,23 @@ def bisect(segments: np.ndarray, line: np.ndarray):
 
     mask = numerator[..., np.newaxis, np.newaxis] > 0
     bisected_ahead = np.where(mask, l_segments, r_segments)[bisected]
-    bisected_behind = np.where(np.logical_not(mask), r_segments, l_segments)[bisected]
+    bisected_behind = np.where(np.logical_not(mask), l_segments, r_segments)[bisected]
 
     # need to return 3 sets of segments, those in front, those colinear, and those behind
     ahead_mask = np.logical_and(ahead, np.logical_not(colinear))
     behind_mask = np.logical_and(behind, np.logical_not(colinear))
 
     if bisected_ahead.size != 0:
-        all_ahead = np.stack((segments[ahead_mask], bisected_ahead))
+        if np.any(ahead_mask):
+            all_ahead = np.stack((segments[ahead_mask], bisected_ahead))
+        else:
+            all_ahead = bisected_ahead
     else:
         all_ahead = segments[ahead_mask]
     if bisected_behind.size != 0:
-        all_behind = np.stack((segments[behind_mask], bisected_behind))
+        if np.any(behind_mask):
+            all_behind = np.stack((segments[behind_mask], bisected_behind))
+        else: all_behind = bisected_behind
     else:
         all_behind = segments[behind_mask]
 

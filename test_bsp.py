@@ -17,6 +17,8 @@ class TestBisectingSegments(unittest.TestCase):
         self.assertTrue(np.allclose(segment, ahead))
 
         ahead, behind, colinear = bsp.bisect(segments, line)
+        self.assertEqual(behind.size, 0)
+        self.assertEqual(colinear.size, 0)
         self.assertTrue(np.allclose(segments, ahead))
 
     def test_segment_behind(self):
@@ -34,6 +36,8 @@ class TestBisectingSegments(unittest.TestCase):
 
         ahead, behind, colinear = bsp.bisect(segments, line)
         self.assertEqual(behind.shape, segments.shape)
+        self.assertEqual(ahead.size, 0)
+        self.assertEqual(colinear.size, 0)
         self.assertTrue(np.allclose(segments, behind))
 
     def test_segment_colinear(self):
@@ -54,6 +58,17 @@ class TestBisectingSegments(unittest.TestCase):
         self.assertEqual(ahead.size, 0)
         self.assertEqual(behind.size, 0)
         self.assertTrue(np.allclose(segments, colinear))
+
+    def test_segment_bisecting(self):
+        segment = np.array([[0,-1],[0,1]])
+        line = np.array([[0, 0], [1, 0]])
+
+        ahead, behind, colinear = bsp.bisect(segment, line)
+        self.assertEqual(ahead.shape, (1,*segment.shape)) # should return a segment ahead and a segment behind
+        self.assertEqual(behind.shape, (1,*segment.shape)) # should return a segment ahead and a segment behind
+        self.assertTrue(np.allclose(np.array([[[0,-1],[0,0]]]), behind), behind)
+        self.assertTrue(np.allclose(np.array([[[0,0],[0,1]]]), ahead), ahead)
+
 
 
 if __name__ == '__main__':
