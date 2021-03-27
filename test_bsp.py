@@ -31,7 +31,7 @@ class TestBisectingSegments(unittest.TestCase):
         line = np.array([[0, 0], [1, 0]])
 
         ahead, behind, colinear = bsp.bisect(segment, line)
-        self.assertEqual(behind.shape, (1,*segment.shape))
+        self.assertEqual(behind.shape, (1, *segment.shape))
         self.assertTrue(np.allclose(segment, behind))
 
         ahead, behind, colinear = bsp.bisect(segments, line)
@@ -50,7 +50,7 @@ class TestBisectingSegments(unittest.TestCase):
         line = np.array([[0, 0], [1, 0]])
 
         ahead, behind, colinear = bsp.bisect(segment, line)
-        self.assertEqual(colinear.shape, (1,*segment.shape))
+        self.assertEqual(colinear.shape, (1, *segment.shape))
         self.assertTrue(np.allclose(segment, colinear))
 
         ahead, behind, colinear = bsp.bisect(segments, line)
@@ -60,15 +60,68 @@ class TestBisectingSegments(unittest.TestCase):
         self.assertTrue(np.allclose(segments, colinear))
 
     def test_segment_bisecting(self):
-        segment = np.array([[0,-1],[0,1]])
+        segment = np.array([[0, -1], [0, 1]])
         line = np.array([[0, 0], [1, 0]])
 
         ahead, behind, colinear = bsp.bisect(segment, line)
-        self.assertEqual(ahead.shape, (1,*segment.shape)) # should return a segment ahead and a segment behind
-        self.assertEqual(behind.shape, (1,*segment.shape)) # should return a segment ahead and a segment behind
-        self.assertTrue(np.allclose(np.array([[[0,-1],[0,0]]]), behind), behind)
-        self.assertTrue(np.allclose(np.array([[[0,0],[0,1]]]), ahead), ahead)
+        self.assertEqual(ahead.shape, (1, *segment.shape))  # should return a segment ahead and a segment behind
+        self.assertEqual(behind.shape, (1, *segment.shape))  # should return a segment ahead and a segment behind
+        self.assertTrue(np.allclose(np.array([[[0, -1], [0, 0]]]), behind), behind)
+        self.assertTrue(np.allclose(np.array([[[0, 0], [0, 1]]]), ahead), ahead)
 
+
+class TestBuildingTree(unittest.TestCase):
+    def test_trivial_case(self):
+        # all segments should be behind eachother
+        segments = np.array([
+            [[0, 1], [1, 1]],
+            [[0, 0], [1, 0]],
+            [[0, -1], [1, -1]]
+        ])
+
+        graph = bsp.build_tree(segments)
+        self.assertEqual(len(graph.nodes), 3)
+        # every edge should be behind
+        positions = [edge[2]['position'] for edge in graph.edges.data()]
+        self.assertTrue(all([position == -1 for position in positions]))
+
+    def test_all_colinear(self):
+        # all segments should be behind eachother
+        segments = np.array([
+            [[0, 0], [10, 0]],
+            [[0, 0], [1, 0]],
+            [[-5, 0], [1, 0]]
+        ])
+
+        graph = bsp.build_tree(segments)
+        # the graph should only have one node
+        self.assertEqual(len(graph.nodes), 1)
+        # there should be no edges
+        self.assertFalse(bool(graph.edges))
+
+        # all colinear lines should be in the first segment
+        self.assertTrue(np.allclose(graph.nodes[0]['colinear_segments'], segments))
+
+    def test_subdividing(self):
+        # all segments should be behind eachother
+        segments = np.array([
+            [[-1, 0], [1, 0]],
+            [[0, -1], [0, 1]]
+        ])
+
+        graph = bsp.build_tree(segments)
+
+        # should have three nodes, because the latter is split
+        self.assertEqual(len(graph.nodes), 3)
+        # every edge should be behind
+
+        # if the edge has a position of -1 we expect the line to be  ((0, -1),(0,0))
+        for u, v, c in graph.edges.data('position'):
+            if c == -1:
+                self.assertTrue(np.allclose(graph.nodes[v]['line'], np.array([[0, -1], [0, 0]])))
+
+            if c == 1:
+                self.assertTrue(np.allclose(graph.nodes[v]['line'], np.array([[0, 0], [0, 1]])))
 
 
 if __name__ == '__main__':
