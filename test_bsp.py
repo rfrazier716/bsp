@@ -133,7 +133,7 @@ class TestAddingRootNode(unittest.TestCase):
         split_line = np.array([[0, -1], [0, 1]])
 
         tree = bsp.build_tree(segments)
-        new_tree = bsp.split_tree(tree, split_line)
+        new_tree = bsp.add_root(tree, split_line)
         # new tree should have three nodes
         self.assertEqual(new_tree.number_of_nodes(), 3)
 
@@ -147,13 +147,12 @@ class TestAddingRootNode(unittest.TestCase):
         split_line = np.array([[-1, -1], [1, -1]])
 
         tree = bsp.build_tree(segments)
-        new_tree = bsp.split_tree(tree, split_line)
+        new_tree = bsp.add_root(tree, split_line)
         # new tree should have only one node
         self.assertEqual(new_tree.number_of_nodes(), 1)
 
         # all segments are in that one node
         self.assertTrue(np.allclose(new_tree.nodes[0]["colinear_segments"], segments))
-
 
     def test_adding_colinear_root(self):
         segments = np.array([
@@ -161,13 +160,50 @@ class TestAddingRootNode(unittest.TestCase):
         ])
 
         tree = bsp.build_tree(segments)
-        new_tree = bsp.split_tree(tree, segments[0])
+        new_tree = bsp.add_root(tree, segments[0])
 
         # the tree should still have only one node
         self.assertEqual(new_tree.number_of_nodes(), 1)
 
         # all segments are in that one node
         self.assertTrue(np.allclose(new_tree.nodes[0]["colinear_segments"], segments))
+
+    def test_adding_root_above(self):
+        segments = np.array([
+            [[-1, 0], [1, 0]]
+        ])
+        split_line = np.array([[0, -1], [0, 1]])
+        tree = bsp.build_tree(segments, split_line)
+
+        split_line = np.array(
+            [[-1, 5], [1, 5]]
+        )
+
+        new_tree = bsp.add_root(tree, split_line)
+        self.assertTrue(new_tree.number_of_nodes(),4)
+
+
+class TestMergingGraphs(unittest.TestCase):
+    def test_merging_all_behind(self):
+        segments = np.array([
+            [[1, -1], [-1, -1]],
+            [[-1, -1], [-1, 1]],
+            [[-1, 1], [1, 1]],
+            [[1, 1], [1, -1]]
+        ])
+
+        segments2 = np.array([
+            [[2, -2], [0, -2]],
+            [[0, -2], [0, 0]],
+            [[0, 0], [2, 0]],
+            [[2, 0], [2, -2]]
+        ])
+
+        T0 = bsp.build_tree(segments)
+        T1 = bsp.build_tree(segments2)
+        merged = bsp.project_tree(T0, T1, trim=False)
+        pass
+
 
 
 class TestTrimmingNodes(unittest.TestCase):

@@ -1,5 +1,6 @@
 import numpy as np
 import networkx as nx
+import networkx.algorithms.traversal.depth_first_search as dfs
 from typing import Tuple
 from copy import deepcopy
 
@@ -38,8 +39,8 @@ def bisect(segments: np.ndarray, line: np.ndarray) -> Tuple[np.ndarray, np.ndarr
     # the intersection time is the point along the line segment where the line bisects it
     intersection = numerator / (denominator + parallel)
 
-    ahead = numerator > 0
-    behind = numerator < 0
+    ahead = np.logical_or(numerator > 0, np.logical_and(np.isclose(numerator, 0), denominator > 0))
+    behind = np.logical_or(numerator < 0, np.logical_and(np.isclose(numerator, 0), denominator < 0))
 
     # segments are colinear if they are parallel and the numerator is zero
     colinear = np.logical_and(parallel, np.isclose(numerator, 0))
@@ -84,7 +85,7 @@ def bisect(segments: np.ndarray, line: np.ndarray) -> Tuple[np.ndarray, np.ndarr
     return all_ahead, all_behind, all_colinear
 
 
-def split_tree(tree: nx.DiGraph, split_line: np.ndarray) -> nx.DiGraph:
+def add_root(tree: nx.DiGraph, split_line: np.ndarray, trim=True) -> nx.DiGraph:
     # create two new trees that are copies of the original tree
     root_node = list(nx.topological_sort(tree))[0]
 
@@ -115,7 +116,8 @@ def split_tree(tree: nx.DiGraph, split_line: np.ndarray) -> nx.DiGraph:
 
     # now compose the two trees together by the root node
     rooted_tree = nx.compose(back_tree, front_tree)
-    trim_leaves(rooted_tree) # trim any dead leaves
+    if trim:
+        trim_leaves(rooted_tree)  # trim any dead leaves
 
     # relabel nodes based on a topological sort
     new_labels = {node: n for n, node in enumerate(nx.topological_sort(rooted_tree))}
@@ -144,6 +146,74 @@ def build_tree(segments: np.ndarray, starting_segment: np.ndarray = None) -> nx.
     return nx.relabel.convert_node_labels_to_integers(graph)
 
 
+def project_tree(T0: nx.DiGraph, T1: nx.DiGraph, trim=True) -> nx.DiGraph:
+    """
+    Returns a new graph where T0 has been projected into T1's bisecting planes
+    :param T0:
+    :param T1:
+    :return:
+    """
+
+    def merge_helper(merge_onto_graph: nx.DiGraph, merge_node: object, to_merge_subgraph: nx.DiGraph) -> nx.DiGraph:
+        # insert a node onto the subgraph which has the same line as the merge graph
+        rooted_graph = add_root(to_merge_subgraph, merge_onto_graph.nodes[merge_node]["line"], trim=False)
+        root_node = list(nx.topological_sort(rooted_graph))[0]
+
+        ahead_child = get_child_ahead(merge_onto_graph, merge_node)
+        behind_child = get_child_behind(merge_onto_graph, merge_node)
+
+        rooted_ahead = get_child_ahead(rooted_graph, root_node)
+        rooted_behind = get_child_behind(rooted_graph, root_node)
+
+        ahead_subgraph = rooted_graph.subgraph(dfs.dfs_tree(rooted_graph, rooted_ahead))
+        behind_subgraph = rooted_graph.subgraph(dfs.dfs_tree(rooted_graph, rooted_behind))
+        # check if the graph being merged onto has a ahead child, if so take the ahead child of the rooted graph
+        # and insert it after this node
+        if ahead_child is not None:
+            # recursively re-enter this function and build a subgraph of all children ahead
+
+            # this is going to be a subgraph with the root at node zero
+            ahead_subgraph = merge_helper(merge_onto_graph,
+                                          ahead_child,
+                                          ahead_subgraph)
+
+        if behind_child is not None:
+            # recursively re-enter this function and build a subgraph of all children ahead
+
+            # this is going to be a subgraph with the root at node zero
+            behind_subgraph = merge_helper(merge_onto_graph,
+                                           behind_child,
+                                           behind_subgraph)
+
+        # now we want to do the disjoint union of both graphs
+        inserted_tree = nx.disjoint_union(ahead_subgraph, behind_subgraph)
+        # copy the colinear root node too
+        inserted_tree.add_node('root',
+                               line=rooted_graph.nodes[root_node]['line'],
+                               colinear_segments=rooted_graph.nodes[root_node]["colinear_segments"])
+
+        # now connect the root node to the
+        n_ahead = ahead_subgraph.number_of_nodes()
+        n_behind = behind_subgraph.number_of_nodes()
+        # if there's any nodes ahead add an edge
+        if n_ahead:
+            inserted_tree.add_edge('root', 0, position=1)
+        if n_behind:
+            inserted_tree.add_edge('root', n_ahead, position=-1)
+
+        # return the inserted tree
+        return inserted_tree
+
+    # generate and return the graph projected into the new space
+    t1_root = list(nx.topological_sort(T1))[0]
+    merged_graph = merge_helper(T1, t1_root, T0)
+    if trim:
+        trim_leaves(merged_graph)
+
+    new_labels = {node: n for n, node in enumerate(nx.topological_sort(merged_graph))}
+    return nx.relabel_nodes(merged_graph, new_labels)
+
+
 def trim_leaves(tree: nx.DiGraph) -> None:
     # removes any nodes that are empty and have less than two out_edges
 
@@ -157,7 +227,7 @@ def trim_leaves(tree: nx.DiGraph) -> None:
     # iterate over all empty nodes
     for node in empty_nodes:
         # if it's empty and has 1 or fewer children it can be deleted
-        if tree.out_degree(node)<2:
+        if tree.out_degree(node) < 2:
             # if there's an in edge and an out edge, join the two otherwise just delete it
             if tree.in_degree(node) == 1 and tree.out_degree(node) == 1:
                 parent_edge = tuple(tree.in_edges(node, data="position"))[0]
@@ -175,7 +245,7 @@ def get_child_ahead(graph: nx.DiGraph, node: object) -> object:
         if c == 1:
             return v
 
-    raise ValueError(f"node {u} has no front children")
+    return None
 
 
 def get_child_behind(graph: nx.DiGraph, node: object) -> object:
@@ -183,4 +253,4 @@ def get_child_behind(graph: nx.DiGraph, node: object) -> object:
         if c == -1:
             return v
 
-    raise ValueError(f"node {u} has no front children")
+    return None
