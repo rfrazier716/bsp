@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 import bsp
+import networkx as nx
 
 
 class TestBisectingSegments(unittest.TestCase):
@@ -122,6 +123,115 @@ class TestBuildingTree(unittest.TestCase):
 
             if c == 1:
                 self.assertTrue(np.allclose(graph.nodes[v]['line'], np.array([[0, 0], [0, 1]])))
+
+
+class TestAddingRootNode(unittest.TestCase):
+    def test_single_node_graph(self):
+        segments = np.array([
+            [[-1, 0], [1, 0]]
+        ])
+        split_line = np.array([[0, -1], [0, 1]])
+
+        tree = bsp.build_tree(segments)
+        new_tree = bsp.split_tree(tree, split_line)
+        # new tree should have three nodes
+        self.assertEqual(new_tree.number_of_nodes(), 3)
+
+        # the root node should have no segments
+        self.assertEqual(new_tree.nodes[0]["colinear_segments"].size, 0)
+
+    def test_adding_root_that_does_not_bisect(self):
+        segments = np.array([
+            [[-1, 0], [1, 0]]
+        ])
+        split_line = np.array([[-1, -1], [1, -1]])
+
+        tree = bsp.build_tree(segments)
+        new_tree = bsp.split_tree(tree, split_line)
+        # new tree should have only one node
+        self.assertEqual(new_tree.number_of_nodes(), 1)
+
+        # all segments are in that one node
+        self.assertTrue(np.allclose(new_tree.nodes[0]["colinear_segments"], segments))
+
+
+    def test_adding_colinear_root(self):
+        segments = np.array([
+            [[-1, 0], [1, 0]]
+        ])
+
+        tree = bsp.build_tree(segments)
+        new_tree = bsp.split_tree(tree, segments[0])
+
+        # the tree should still have only one node
+        self.assertEqual(new_tree.number_of_nodes(), 1)
+
+        # all segments are in that one node
+        self.assertTrue(np.allclose(new_tree.nodes[0]["colinear_segments"], segments))
+
+
+class TestTrimmingNodes(unittest.TestCase):
+
+    def setUp(self) -> None:
+        # make a basic dummy tree where every child is behind the parent
+        self.tree = nx.DiGraph()
+        for j in range(3):
+            self.tree.add_node(j, colinear_segments=np.zeros((1, 2, 2)))
+            if j != 0:
+                self.tree.add_edge(j - 1, j, position=-1)
+
+    def test_trimming_bottom_tree(self):
+
+        # make the last tree empty
+        self.tree.nodes[2]["colinear_segments"] = np.empty((0, 2, 2))
+
+        bsp.trim_leaves(self.tree)
+        self.assertEqual(self.tree.number_of_nodes(), 2)
+
+        # the third node should have been deleted
+        self.assertEqual((0, 1), tuple(self.tree.nodes))
+
+    def test_trimming_top_of_tree(self):
+
+        # make the root node empty
+        self.tree.nodes[0]["colinear_segments"] = np.empty((0, 2, 2))
+
+        bsp.trim_leaves(self.tree)
+        self.assertEqual(self.tree.number_of_nodes(), 2)
+
+        # the third node should have been deleted
+        self.assertEqual((1, 2), tuple(self.tree.nodes))
+
+    def test_trimming_middle_of_tree(self):
+        # make the middle node empty
+        self.tree.nodes[1]["colinear_segments"] = np.empty((0, 2, 2))
+
+        bsp.trim_leaves(self.tree)
+        self.assertEqual(self.tree.number_of_nodes(), 2)
+
+        # the third node should have been deleted
+        self.assertEqual((0, 2), tuple(self.tree.nodes))
+
+        # there should be an edge between node 0 and 2 now
+        self.assertTrue(self.tree.has_edge(0, 2))
+
+        # the back child of node 0 should now be node 2
+        # there should be an edge between node 0 and 2 now
+        self.assertTrue(bsp.get_child_behind(self.tree, 0), 2)
+
+    def test_keeping_empty_node_with_two_children(self):
+        # make the middle node empty but add a front child
+        self.tree.nodes[1]["colinear_segments"] = np.empty((0, 2, 2))
+        self.tree.add_node(3, colinear_segments=np.zeros((1, 2, 2)))
+        self.tree.add_edge(1, 3, position=1)
+
+        bsp.trim_leaves(self.tree)
+        self.assertEqual(self.tree.number_of_nodes(), 4)
+
+        # but if that third node is empty, both 1 and 3 are trimmed
+        self.tree.nodes[3]["colinear_segments"] = np.empty((0, 2, 2))
+        bsp.trim_leaves(self.tree)
+        self.assertEqual(self.tree.number_of_nodes(), 2)
 
 
 if __name__ == '__main__':
