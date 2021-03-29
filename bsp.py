@@ -209,7 +209,7 @@ def project_tree(T0: nx.DiGraph, T1: nx.DiGraph, trim=True, projection: str = 'b
         # otherwise add the remaining ahead nodes to the merge_onto_graph and connect with an edge
         elif tree_ahead.number_of_nodes() > 0 and keep_outer:
             # rename the nodes
-            node_labels = {x: f"{merge_node}-{x}" for x in tree_ahead.nodes}
+            node_labels = {x: f"f{merge_node}-{x}" for x in tree_ahead.nodes}
             nx.relabel.relabel_nodes(tree_ahead, node_labels, copy=False)
             merge_onto_graph = nx.union(merge_onto_graph, tree_ahead)
 
@@ -225,7 +225,7 @@ def project_tree(T0: nx.DiGraph, T1: nx.DiGraph, trim=True, projection: str = 'b
         # otherwise add the remaining ahead nodes to the merge_onto_graph and connect with an edge
         elif tree_behind.number_of_nodes() > 0 and keep_inner:
             # rename the nodes
-            node_labels = {x: f"{merge_node}-{x}" for x in tree_behind.nodes}
+            node_labels = {x: f"b{merge_node}-{x}" for x in tree_behind.nodes}
             nx.relabel.relabel_nodes(tree_behind, node_labels, copy=False)
             merge_onto_graph = nx.union(merge_onto_graph, tree_behind)
 
@@ -294,17 +294,42 @@ def get_child_behind(graph: nx.DiGraph, node: object) -> object:
     return None
 
 
-def draw_segments(tree: nx.DiGraph) -> None:
-    fig = plt.figure()
-    axis = plt.gca()
+def draw_segments(tree: nx.DiGraph, axis=None, *args, **kwargs) -> None:
+    if axis is None:
+        axis = plt.gca()
     all_segments = np.concatenate([value for value in dict(nx.get_node_attributes(tree, "colinear_segments")).values()])
     for segment in all_segments:
-        axis.plot(*(segment.T), "k-o", linewidth=3, markersize=12)
-    plt.show()
+        axis.plot(*(segment.T), *args, **kwargs)
 
 
 def get_root(tree):
     return [n for n, d in tree.in_degree() if d == 0][0]
+
+
+def invert(tree: nx.DiGraph) -> nx.DiGraph:
+    """
+    Creates a copy of the tre where surface directions are flipped.
+
+    :param tree:
+    :return:
+    """
+    new_tree = tree.copy()
+    for node in new_tree.nodes:
+        swap = np.empty(new_tree.nodes[node]['colinear_segments'].shape)
+        swap[:, 1, :] = new_tree.nodes[node]['colinear_segments'][:, 0, :]
+        swap[:, 0, :] = new_tree.nodes[node]['colinear_segments'][:, 1, :]
+        new_tree.nodes[node]['colinear_segments'] = swap
+
+        line_swap = np.empty((2, 2))
+        old_line = new_tree.nodes[node]['line']
+        line_swap[0] = old_line[1]
+        line_swap[1] = old_line[0]
+        new_tree.nodes[node]['line'] = line_swap
+
+    for edge in new_tree.edges:
+        new_tree.edges[edge]['position'] *= -1
+
+    return new_tree
 
 
 def union(T0: nx.DiGraph, T1: nx.DiGraph) -> nx.DiGraph:
@@ -328,7 +353,7 @@ def intersection(T0: nx.DiGraph, T1: nx.DiGraph) -> nx.DiGraph:
 def difference(T0: nx.DiGraph, T1: nx.DiGraph) -> nx.DiGraph:
     # make shell copies of T0 and T1 with no data associated
     clipped_t0 = project_tree(T0, T1, projection='outer', merge=False)
-    clipped_t1 = project_tree(T1, T0, projection='inner', merge=False)
+    clipped_t1 = project_tree(invert(T1), T0, projection='inner', merge=False)
     csg = project_tree(clipped_t0, clipped_t1, projection='both', merge=True)
     return csg
     # project T0 onto T1, keeping outer
