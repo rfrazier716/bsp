@@ -202,7 +202,7 @@ class TestMergingGraphs(unittest.TestCase):
         T0 = bsp.build_tree(segments)
         T1 = bsp.build_tree(segments2)
         merged = bsp.project_tree(T0, T1, trim=False)
-        pass
+        bsp.draw_segments(merged)
 
 
 
@@ -237,6 +237,18 @@ class TestTrimmingNodes(unittest.TestCase):
 
         # the third node should have been deleted
         self.assertEqual((1, 2), tuple(self.tree.nodes))
+
+    def test_keeping_root_node(self):
+        # make the root node empty
+        self.tree.nodes[0]["colinear_segments"] = np.empty((0, 2, 2))
+
+        # trimming should have no effect
+        bsp.trim_leaves(self.tree, trim_root=False)
+        self.assertEqual(self.tree.number_of_nodes(), 3)
+
+        # the third node should have been deleted
+        self.assertEqual((0, 1, 2), tuple(self.tree.nodes))
+
 
     def test_trimming_middle_of_tree(self):
         # make the middle node empty

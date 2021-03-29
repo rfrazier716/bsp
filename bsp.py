@@ -3,6 +3,7 @@ import networkx as nx
 import networkx.algorithms.traversal.depth_first_search as dfs
 from typing import Tuple
 from copy import deepcopy
+import matplotlib.pyplot as plt
 
 
 def bisect(segments: np.ndarray, line: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -39,8 +40,8 @@ def bisect(segments: np.ndarray, line: np.ndarray) -> Tuple[np.ndarray, np.ndarr
     # the intersection time is the point along the line segment where the line bisects it
     intersection = numerator / (denominator + parallel)
 
-    ahead = np.logical_or(numerator > 0, np.logical_and(np.isclose(numerator, 0), denominator > 0))
-    behind = np.logical_or(numerator < 0, np.logical_and(np.isclose(numerator, 0), denominator < 0))
+    ahead = np.logical_or(numerator > 0, np.logical_and(np.isclose(numerator, 0), denominator < 0))
+    behind = np.logical_or(numerator < 0, np.logical_and(np.isclose(numerator, 0), denominator > 0))
 
     # segments are colinear if they are parallel and the numerator is zero
     colinear = np.logical_and(parallel, np.isclose(numerator, 0))
@@ -157,6 +158,7 @@ def project_tree(T0: nx.DiGraph, T1: nx.DiGraph, trim=True) -> nx.DiGraph:
     def merge_helper(merge_onto_graph: nx.DiGraph, merge_node: object, to_merge_subgraph: nx.DiGraph) -> nx.DiGraph:
         # insert a node onto the subgraph which has the same line as the merge graph
         rooted_graph = add_root(to_merge_subgraph, merge_onto_graph.nodes[merge_node]["line"], trim=False)
+        trim_leaves(rooted_graph, trim_root=False)
         root_node = list(nx.topological_sort(rooted_graph))[0]
 
         ahead_child = get_child_ahead(merge_onto_graph, merge_node)
@@ -165,11 +167,18 @@ def project_tree(T0: nx.DiGraph, T1: nx.DiGraph, trim=True) -> nx.DiGraph:
         rooted_ahead = get_child_ahead(rooted_graph, root_node)
         rooted_behind = get_child_behind(rooted_graph, root_node)
 
-        ahead_subgraph = rooted_graph.subgraph(dfs.dfs_tree(rooted_graph, rooted_ahead))
-        behind_subgraph = rooted_graph.subgraph(dfs.dfs_tree(rooted_graph, rooted_behind))
+        if rooted_ahead is not None:
+            ahead_subgraph = rooted_graph.subgraph(dfs.dfs_tree(rooted_graph, rooted_ahead))
+        else:
+            ahead_subgraph = nx.DiGraph()
+
+        if rooted_behind is not None:
+            behind_subgraph = rooted_graph.subgraph(dfs.dfs_tree(rooted_graph, rooted_behind))
+        else:
+            behind_subgraph = nx.DiGraph()
         # check if the graph being merged onto has a ahead child, if so take the ahead child of the rooted graph
         # and insert it after this node
-        if ahead_child is not None:
+        if ahead_child is not None and (rooted_ahead is not None):
             # recursively re-enter this function and build a subgraph of all children ahead
 
             # this is going to be a subgraph with the root at node zero
@@ -177,7 +186,7 @@ def project_tree(T0: nx.DiGraph, T1: nx.DiGraph, trim=True) -> nx.DiGraph:
                                           ahead_child,
                                           ahead_subgraph)
 
-        if behind_child is not None:
+        if behind_child is not None and (rooted_behind is not None):
             # recursively re-enter this function and build a subgraph of all children ahead
 
             # this is going to be a subgraph with the root at node zero
@@ -204,6 +213,8 @@ def project_tree(T0: nx.DiGraph, T1: nx.DiGraph, trim=True) -> nx.DiGraph:
         # return the inserted tree
         return inserted_tree
 
+
+
     # generate and return the graph projected into the new space
     t1_root = list(nx.topological_sort(T1))[0]
     merged_graph = merge_helper(T1, t1_root, T0)
@@ -214,7 +225,18 @@ def project_tree(T0: nx.DiGraph, T1: nx.DiGraph, trim=True) -> nx.DiGraph:
     return nx.relabel_nodes(merged_graph, new_labels)
 
 
-def trim_leaves(tree: nx.DiGraph) -> None:
+def clip_to(T0: nx.DiGraph, T1: nx.DiGraph) -> nx.DiGraph:
+    """
+    Clips BSP tree T0 to T1, returning a tree containing only polygons from T0 that fall within T1
+    :param T0:
+    :param T1:
+    :return:
+    """
+    projected_tree = project_tree(T0, T1)
+
+
+
+def trim_leaves(tree: nx.DiGraph, trim_root=True) -> None:
     # removes any nodes that are empty and have less than two out_edges
 
     # get a set of nodes that don't have any colinear segments
@@ -227,7 +249,9 @@ def trim_leaves(tree: nx.DiGraph) -> None:
     # iterate over all empty nodes
     for node in empty_nodes:
         # if it's empty and has 1 or fewer children it can be deleted
-        if tree.out_degree(node) < 2:
+        # second argument prevents deleting the root node
+
+        if tree.out_degree(node) < 2 and (tree.in_degree(node)!=0 or trim_root):
             # if there's an in edge and an out edge, join the two otherwise just delete it
             if tree.in_degree(node) == 1 and tree.out_degree(node) == 1:
                 parent_edge = tuple(tree.in_edges(node, data="position"))[0]
@@ -254,3 +278,12 @@ def get_child_behind(graph: nx.DiGraph, node: object) -> object:
             return v
 
     return None
+
+
+def draw_segments(tree: nx.DiGraph) -> None:
+    fig = plt.figure()
+    axis = plt.gca()
+    all_segments = np.concatenate([value for value in dict(nx.get_node_attributes(tree, "colinear_segments")).values()])
+    for segment in all_segments:
+        axis.plot(*(segment.T), "k-o", linewidth=3, markersize=12)
+    plt.show()
