@@ -86,6 +86,32 @@ def bisect(segments: np.ndarray, line: np.ndarray) -> Tuple[np.ndarray, np.ndarr
     return all_ahead, all_behind, all_colinear
 
 
+def split_tree(tree: nx.DiGraph, split_line: np.ndarray, trim=True) -> Tuple[nx.DiGraph, nx.DiGraph, np.ndarray]:
+    # create two new trees that are copies of the original tree
+    front_tree = tree.copy()
+    back_tree = tree.copy()
+
+    # for every node in the tree, bisect the segments in the node with the split line, put front segments in the front
+    # tree, back segments in the back tree, and coplanar segments in the new root node
+    split_colinear_segments = np.empty((0, 2, 2))
+    for node in tree.nodes:
+        ahead, behind, colinear = bisect(tree.nodes[node]["colinear_segments"], split_line)
+        front_tree.nodes[node]["colinear_segments"] = ahead  # all lines in front go into the front tree
+        back_tree.nodes[node]["colinear_segments"] = behind  # all lines behind go into the back tree
+
+        # colinear lines are added to the root node
+        split_colinear_segments = np.concatenate((
+            split_colinear_segments,
+            colinear
+        ))
+
+    if trim:
+        trim_leaves(front_tree)
+        trim_leaves(back_tree)
+
+    return front_tree, back_tree, split_colinear_segments
+
+
 def add_root(tree: nx.DiGraph, split_line: np.ndarray, trim=True) -> nx.DiGraph:
     # create two new trees that are copies of the original tree
     root_node = list(nx.topological_sort(tree))[0]
@@ -147,76 +173,71 @@ def build_tree(segments: np.ndarray, starting_segment: np.ndarray = None) -> nx.
     return nx.relabel.convert_node_labels_to_integers(graph)
 
 
-def project_tree(T0: nx.DiGraph, T1: nx.DiGraph, trim=True) -> nx.DiGraph:
+def project_tree(T0: nx.DiGraph, T1: nx.DiGraph, trim=True, projection: str = 'both', merge=True) -> nx.DiGraph:
     """
     Returns a new graph where T0 has been projected into T1's bisecting planes
     :param T0:
     :param T1:
     :return:
     """
+    if projection not in ('inner', 'outer', 'both'):
+        raise ValueError("projection must be one of inner, outer, or both")
+
+    keep_inner = projection in ('inner', 'both')
+    keep_outer = projection in ('outer', 'both')
 
     def merge_helper(merge_onto_graph: nx.DiGraph, merge_node: object, to_merge_subgraph: nx.DiGraph) -> nx.DiGraph:
         # insert a node onto the subgraph which has the same line as the merge graph
-        rooted_graph = add_root(to_merge_subgraph, merge_onto_graph.nodes[merge_node]["line"], trim=False)
-        trim_leaves(rooted_graph, trim_root=False)
-        root_node = list(nx.topological_sort(rooted_graph))[0]
+        tree_ahead, tree_behind, colinear_segments = split_tree(to_merge_subgraph,
+                                                                merge_onto_graph.nodes[merge_node]["line"])
+
+        # if we're not merging the graphs, clear data from the project onto graph
+        if not merge:
+            merge_onto_graph.nodes[merge_node]['colinear_segments'] = np.empty((0, 2, 2))
+
+        # append the colinear points
+        add_segments_to_node(merge_onto_graph, merge_node, colinear_segments)
 
         ahead_child = get_child_ahead(merge_onto_graph, merge_node)
         behind_child = get_child_behind(merge_onto_graph, merge_node)
 
-        rooted_ahead = get_child_ahead(rooted_graph, root_node)
-        rooted_behind = get_child_behind(rooted_graph, root_node)
+        # descend down the positive branch of the tree
+        # recursively call if the merge onto graph has a positive child
+        if ahead_child is not None:
+            merge_onto_graph = merge_helper(merge_onto_graph, ahead_child, tree_ahead)
 
-        if rooted_ahead is not None:
-            ahead_subgraph = rooted_graph.subgraph(dfs.dfs_tree(rooted_graph, rooted_ahead))
-        else:
-            ahead_subgraph = nx.DiGraph()
+        # otherwise add the remaining ahead nodes to the merge_onto_graph and connect with an edge
+        elif tree_ahead.number_of_nodes() > 0 and keep_outer:
+            # rename the nodes
+            node_labels = {x: f"{merge_node}-{x}" for x in tree_ahead.nodes}
+            nx.relabel.relabel_nodes(tree_ahead, node_labels, copy=False)
+            merge_onto_graph = nx.union(merge_onto_graph, tree_ahead)
 
-        if rooted_behind is not None:
-            behind_subgraph = rooted_graph.subgraph(dfs.dfs_tree(rooted_graph, rooted_behind))
-        else:
-            behind_subgraph = nx.DiGraph()
-        # check if the graph being merged onto has a ahead child, if so take the ahead child of the rooted graph
-        # and insert it after this node
-        if ahead_child is not None and (rooted_ahead is not None):
-            # recursively re-enter this function and build a subgraph of all children ahead
+            # add an edge
+            tree_ahead_head = get_root(tree_ahead)
+            merge_onto_graph.add_edge(merge_node, tree_ahead_head, position=+1)
 
-            # this is going to be a subgraph with the root at node zero
-            ahead_subgraph = merge_helper(merge_onto_graph,
-                                          ahead_child,
-                                          ahead_subgraph)
+        # descend down the negative branch of the tree
+        # recursively call if the merge onto graph has a positive child
+        if behind_child is not None:
+            merge_onto_graph = merge_helper(merge_onto_graph, behind_child, tree_behind)
 
-        if behind_child is not None and (rooted_behind is not None):
-            # recursively re-enter this function and build a subgraph of all children ahead
+        # otherwise add the remaining ahead nodes to the merge_onto_graph and connect with an edge
+        elif tree_behind.number_of_nodes() > 0 and keep_inner:
+            # rename the nodes
+            node_labels = {x: f"{merge_node}-{x}" for x in tree_behind.nodes}
+            nx.relabel.relabel_nodes(tree_behind, node_labels, copy=False)
+            merge_onto_graph = nx.union(merge_onto_graph, tree_behind)
 
-            # this is going to be a subgraph with the root at node zero
-            behind_subgraph = merge_helper(merge_onto_graph,
-                                           behind_child,
-                                           behind_subgraph)
+            # add an edge
+            tree_behind_head = get_root(tree_behind)
+            merge_onto_graph.add_edge(merge_node, tree_behind_head, position=-1)
 
-        # now we want to do the disjoint union of both graphs
-        inserted_tree = nx.disjoint_union(ahead_subgraph, behind_subgraph)
-        # copy the colinear root node too
-        inserted_tree.add_node('root',
-                               line=rooted_graph.nodes[root_node]['line'],
-                               colinear_segments=rooted_graph.nodes[root_node]["colinear_segments"])
+        return merge_onto_graph
 
-        # now connect the root node to the
-        n_ahead = ahead_subgraph.number_of_nodes()
-        n_behind = behind_subgraph.number_of_nodes()
-        # if there's any nodes ahead add an edge
-        if n_ahead:
-            inserted_tree.add_edge('root', 0, position=1)
-        if n_behind:
-            inserted_tree.add_edge('root', n_ahead, position=-1)
-
-        # return the inserted tree
-        return inserted_tree
-
-
-
-    # generate and return the graph projected into the new space
-    t1_root = list(nx.topological_sort(T1))[0]
+    # rename both graphs so there's not an error when adding nodes
+    T1 = T1.copy()
+    t1_root = get_root(T1)
     merged_graph = merge_helper(T1, t1_root, T0)
     if trim:
         trim_leaves(merged_graph)
@@ -225,15 +246,8 @@ def project_tree(T0: nx.DiGraph, T1: nx.DiGraph, trim=True) -> nx.DiGraph:
     return nx.relabel_nodes(merged_graph, new_labels)
 
 
-def clip_to(T0: nx.DiGraph, T1: nx.DiGraph) -> nx.DiGraph:
-    """
-    Clips BSP tree T0 to T1, returning a tree containing only polygons from T0 that fall within T1
-    :param T0:
-    :param T1:
-    :return:
-    """
-    projected_tree = project_tree(T0, T1)
-
+def add_segments_to_node(tree, node, segments):
+    tree.nodes[node]['colinear_segments'] = np.concatenate((tree.nodes[node]['colinear_segments'], segments))
 
 
 def trim_leaves(tree: nx.DiGraph, trim_root=True) -> None:
@@ -251,7 +265,7 @@ def trim_leaves(tree: nx.DiGraph, trim_root=True) -> None:
         # if it's empty and has 1 or fewer children it can be deleted
         # second argument prevents deleting the root node
 
-        if tree.out_degree(node) < 2 and (tree.in_degree(node)!=0 or trim_root):
+        if tree.out_degree(node) < 2 and (tree.in_degree(node) != 0 or trim_root):
             # if there's an in edge and an out edge, join the two otherwise just delete it
             if tree.in_degree(node) == 1 and tree.out_degree(node) == 1:
                 parent_edge = tuple(tree.in_edges(node, data="position"))[0]
@@ -287,3 +301,34 @@ def draw_segments(tree: nx.DiGraph) -> None:
     for segment in all_segments:
         axis.plot(*(segment.T), "k-o", linewidth=3, markersize=12)
     plt.show()
+
+
+def get_root(tree):
+    return [n for n, d in tree.in_degree() if d == 0][0]
+
+
+def union(T0: nx.DiGraph, T1: nx.DiGraph) -> nx.DiGraph:
+    # make shell copies of T0 and T1 with no data associated
+    clipped_t0 = project_tree(T0, T1, projection='outer', merge=False)
+    clipped_t1 = project_tree(T1, T0, projection='outer', merge=False)
+    csg = project_tree(clipped_t0, clipped_t1, projection='both', merge=True)
+    return csg
+    # project T0 onto T1, keeping outer
+
+
+def intersection(T0: nx.DiGraph, T1: nx.DiGraph) -> nx.DiGraph:
+    # make shell copies of T0 and T1 with no data associated
+    clipped_t0 = project_tree(T0, T1, projection='inner', merge=False)
+    clipped_t1 = project_tree(T1, T0, projection='inner', merge=False)
+    csg = project_tree(clipped_t0, clipped_t1, projection='both', merge=True)
+    return csg
+    # project T0 onto T1, keeping outer
+
+
+def difference(T0: nx.DiGraph, T1: nx.DiGraph) -> nx.DiGraph:
+    # make shell copies of T0 and T1 with no data associated
+    clipped_t0 = project_tree(T0, T1, projection='outer', merge=False)
+    clipped_t1 = project_tree(T1, T0, projection='inner', merge=False)
+    csg = project_tree(clipped_t0, clipped_t1, projection='both', merge=True)
+    return csg
+    # project T0 onto T1, keeping outer

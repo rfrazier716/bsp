@@ -201,8 +201,18 @@ class TestMergingGraphs(unittest.TestCase):
 
         T0 = bsp.build_tree(segments)
         T1 = bsp.build_tree(segments2)
-        merged = bsp.project_tree(T0, T1, trim=False)
+        merged = bsp.union(T0,T1)
         bsp.draw_segments(merged)
+
+        merged = bsp.intersection(T0,T1)
+        bsp.draw_segments(merged)
+
+        merged = bsp.difference(T0,T1)
+        bsp.draw_segments(merged)
+
+        merged = bsp.union(T0, merged)
+        bsp.draw_segments(merged)
+
 
 
 
